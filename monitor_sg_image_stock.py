@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.parse
@@ -39,8 +40,11 @@ class VariantStatus:
     product_title: str
     variant_id: int
     variant_title: str
+    json_available: bool
+    page_available: bool
     available: bool
     price: str
+    page_reason: str
 
 
 def http_json(url: str, token: str | None = None, method: str = "GET", payload: dict[str, Any] | None = None) -> Any:
@@ -61,20 +65,70 @@ def http_json(url: str, token: str | None = None, method: str = "GET", payload: 
         return json.loads(response.read().decode(charset))
 
 
+def http_text(url: str) -> str:
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "text/html,application/xhtml+xml",
+            "User-Agent": "stock-notification-bot/1.0",
+        },
+        method="GET",
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        charset = response.headers.get_content_charset("utf-8")
+        return response.read().decode(charset, errors="replace")
+
+
+def storefront_availability(page_html: str) -> tuple[bool, str]:
+    sold_out_badge = bool(
+        re.search(r'price__badge-sold-out[^>]*>\s*Sold out\s*<', page_html, flags=re.IGNORECASE)
+    )
+
+    checked_unavailable = bool(
+        re.search(
+            r"<input[^>]*checked[^>]*>\s*<label[^>]*>.*?label-unavailable",
+            page_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    )
+
+    add_to_cart_enabled = bool(
+        re.search(
+            r'<button[^>]*product-form__submit[^>]*>\s*<span>\s*Add to cart\s*</span>',
+            page_html,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+    )
+
+    if sold_out_badge:
+        return False, "page shows a Sold out badge"
+    if checked_unavailable:
+        return False, "selected page options are marked sold out or unavailable"
+    if not add_to_cart_enabled:
+        return False, "page does not show an enabled Add to cart button"
+    return True, "page shows the selected variant as purchasable"
+
+
 def fetch_variant_status() -> VariantStatus:
     product = http_json(PRODUCT_JSON_URL)
+    page_html = http_text(PRODUCT_PAGE_URL)
     variants = product.get("variants", [])
+    page_available, page_reason = storefront_availability(page_html)
 
     for variant in variants:
         if int(variant["id"]) == VARIANT_ID:
             cents = int(variant["price"])
             price = f"${cents / 100:.2f}"
+            json_available = bool(variant["available"])
             return VariantStatus(
                 product_title=product["title"],
                 variant_id=VARIANT_ID,
                 variant_title=variant["title"],
-                available=bool(variant["available"]),
+                json_available=json_available,
+                page_available=page_available,
+                available=json_available and page_available,
                 price=price,
+                page_reason=page_reason,
             )
 
     raise RuntimeError(f"Variant {VARIANT_ID} was not found at {PRODUCT_JSON_URL}")
@@ -123,6 +177,8 @@ def create_issue(token: str, status: VariantStatus) -> None:
         f"- Price: {status.price}\n"
         f"- Variant ID: `{status.variant_id}`\n"
         f"- Link: {PRODUCT_PAGE_URL}\n"
+        f"- Shopify JSON available: `{str(status.json_available).lower()}`\n"
+        f"- Storefront page available: `{str(status.page_available).lower()}` ({status.page_reason})\n"
     )
     payload: dict[str, Any] = {
         "title": ISSUE_TITLE,
@@ -168,7 +224,9 @@ def update_notifications(status: VariantStatus) -> None:
                     f"Back in stock as of {timestamp}.\n\n"
                     f"- Variant: {status.variant_title}\n"
                     f"- Price: {status.price}\n"
-                    f"- Link: {PRODUCT_PAGE_URL}"
+                    f"- Link: {PRODUCT_PAGE_URL}\n"
+                    f"- Shopify JSON available: `{str(status.json_available).lower()}`\n"
+                    f"- Storefront page available: `{str(status.page_available).lower()}` ({status.page_reason})"
                 ),
             )
             print(f"Reopened issue #{closed_issue['number']}.")
@@ -200,7 +258,10 @@ def write_summary(status: VariantStatus) -> None:
         f"- Variant: {status.variant_title}",
         f"- Variant ID: `{status.variant_id}`",
         f"- Price: {status.price}",
-        f"- Available: `{'yes' if status.available else 'no'}`",
+        f"- Shopify JSON available: `{'yes' if status.json_available else 'no'}`",
+        f"- Storefront page available: `{'yes' if status.page_available else 'no'}`",
+        f"- Page signal: {status.page_reason}",
+        f"- Alert eligible: `{'yes' if status.available else 'no'}`",
         f"- Link: {PRODUCT_PAGE_URL}",
         "",
     ]
@@ -217,7 +278,8 @@ def main() -> int:
         status = fetch_variant_status()
         print(
             f"Checked variant {status.variant_id} ({status.variant_title}): "
-            f"{'in stock' if status.available else 'out of stock'} at {status.price}"
+            f"{'in stock' if status.available else 'out of stock'} at {status.price} "
+            f"(json={status.json_available}, page={status.page_available})"
         )
         write_summary(status)
         update_notifications(status)

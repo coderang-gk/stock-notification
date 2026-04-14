@@ -5,7 +5,8 @@ This repo watches the SG-image AF35mm f/2.2 lens Shopify listing and alerts when
 ## How it works
 
 - GitHub Actions runs `.github/workflows/sg-image-l-mount-stock.yml` every 5 minutes, which is GitHub's fastest cron interval.
-- The workflow fetches the store's Shopify product JSON endpoint and checks only the target variant ID.
+- The workflow fetches both the store's Shopify product JSON endpoint and the rendered product page for the target variant.
+- It alerts only when both signals agree the `L / With Square Lens Hood` variant is purchasable, which helps avoid false positives when the storefront page and Shopify data disagree.
 - When the lens is in stock, the workflow opens or reopens a GitHub issue titled `SG-image AF35mm f/2.2 L-mount is in stock`.
 - When it goes out of stock again, the workflow comments on that issue and closes it so the next restock can alert again.
 
