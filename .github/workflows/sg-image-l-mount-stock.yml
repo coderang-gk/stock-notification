@@ -1,0 +1,28 @@
+name: SG-image L-mount stock check
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: sg-image-l-mount-stock-check
+  cancel-in-progress: false
+
+jobs:
+  check-stock:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Check SG-image L-mount stock
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SG_VARIANT_ID: "48131425272033"
+          SG_ALERT_RECIPIENT: ${{ github.repository_owner }}
+        run: python3 monitor_sg_image_stock.py
