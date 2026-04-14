@@ -3,7 +3,7 @@ name: SG-image L-mount stock check
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
 
 permissions:
   contents: read
@@ -19,6 +19,20 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
+      - name: Write heartbeat
+        run: |
+          NOW_UTC="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "Workflow heartbeat: trigger=${{ github.event_name }} started_at=${NOW_UTC}"
+          {
+            echo "## Workflow heartbeat"
+            echo
+            echo "- Trigger: \`${{ github.event_name }}\`"
+            echo "- Started at: \`${NOW_UTC}\`"
+            echo "- Workflow: \`${{ github.workflow }}\`"
+            echo "- Run number: \`${{ github.run_number }}\`"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check SG-image L-mount stock
         env:
